@@ -6,14 +6,14 @@ class RegisterSchema(BaseModel):
 
     username: str
 
-    email: EmailStr
+    primary_email: EmailStr
 
     password: str
 
 
 class LoginSchema(BaseModel):
 
-    email: EmailStr
+    username: str
 
     password: str
 
@@ -24,7 +24,7 @@ class UserResponse(BaseModel):
 
     username: str
 
-    email: str
+    primary_email: str
 
     class Config:
 

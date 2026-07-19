@@ -1,11 +1,9 @@
-from logger import logger
+import logging
 
-logger.add(
 
-    "logs/app.log",
-
-    rotation="10 MB",
-
-    retention="30 days"
-
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s"
 )
+
+logger = logging.getLogger("imp_mail_finder")

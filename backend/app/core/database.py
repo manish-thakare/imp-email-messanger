@@ -4,8 +4,19 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from app.core.config import settings
 
+
+def get_database_url():
+    if settings.DATABASE_URL.startswith("postgresql://"):
+        return settings.DATABASE_URL.replace(
+            "postgresql://",
+            "postgresql+asyncpg://",
+            1
+        )
+    return settings.DATABASE_URL
+
+
 engine=create_async_engine(
-    settings.DATABASE_URL,
+    get_database_url(),
     echo=True
 )
 

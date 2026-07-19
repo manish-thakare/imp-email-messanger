@@ -27,23 +27,37 @@ class AuthService:
 
         username,
 
-        email,
+        primary_email,
 
         password
 
     ):
 
-        exists = await self.repo.get_by_email(
+        existing_username = await self.repo.get_by_username(
 
-            email
+            username
 
         )
 
-        if exists:
+        if existing_username:
 
-            raise Exception(
+            raise ValueError(
 
-                "Email already exists"
+                "Username already exists"
+
+            )
+
+        existing_email = await self.repo.get_by_email(
+
+            primary_email
+
+        )
+
+        if existing_email:
+
+            raise ValueError(
+
+                "Primary email already exists"
 
             )
 
@@ -51,7 +65,7 @@ class AuthService:
 
             username=username,
 
-            email=email,
+            primary_email=primary_email,
 
             password=hash_password(password)
 
@@ -64,15 +78,15 @@ class AuthService:
 
         self,
 
-        email,
+        username,
 
         password
 
     ):
 
-        user = await self.repo.get_by_email(
+        user = await self.repo.get_by_username(
 
-            email
+            username
 
         )
 
@@ -94,7 +108,7 @@ class AuthService:
 
             {
 
-                "sub": user.email
+                "sub": user.username
 
             }
 

@@ -4,6 +4,7 @@ uvicorn[standard]
 sqlalchemy
 
 psycopg2-binary
+asyncpg
 
 alembic
 

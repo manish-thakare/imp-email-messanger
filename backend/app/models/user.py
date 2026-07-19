@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, DateTime, String
+from sqlalchemy import Integer, DateTime, String
 from datetime import datetime
 from app.core.database import Base
 from sqlalchemy.orm import Mapped
@@ -16,17 +16,21 @@ class User(Base):
 
     username: Mapped[str] = mapped_column(
         String(100),
+        unique=True,
+        index=True,
         nullable=False
     )
 
-    email: Mapped[str] = mapped_column(
+    primary_email: Mapped[str] = mapped_column(
         String(255),
         unique=True,
-        index=True
+        index=True,
+        nullable=False
     )
 
     password: Mapped[str] = mapped_column(
-        String(255)
+        String(255),
+        nullable=False
     )
 
     created_at: Mapped[datetime] = mapped_column(

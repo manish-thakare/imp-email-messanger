@@ -18,14 +18,21 @@ async def register(
 ):
     repo = UserRepository(db)
     service = AuthService(repo)
-    user = await service.register(
-        request.username,
-        request.email,
-        request.password
-    )
+    try:
+        user = await service.register(
+            request.username,
+            request.primary_email,
+            request.password
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            400,
+            str(exc)
+        ) from exc
     return {
         "message": "registered",
-        "user": user.email
+        "username": user.username,
+        "primary_email": user.primary_email
     }
 
 #login route
@@ -37,7 +44,7 @@ async def login(
     repo = UserRepository(db)
     service = AuthService(repo)
     token = await service.login(
-        request.email,
+        request.username,
         request.password
     )
     if token is None:
