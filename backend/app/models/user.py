@@ -1,11 +1,13 @@
-from sqlalchemy import Integer, DateTime, String
 from datetime import datetime
+from datetime import timezone
+
+from sqlalchemy import DateTime, Integer, String
 from app.core.database import Base
-from sqlalchemy.orm import Mapped
-from sqlalchemy.orm import mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 
 class User(Base):
+    """The application's owner account, separate from monitored inboxes."""
 
     __tablename__ = "users"
 
@@ -34,6 +36,14 @@ class User(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    # Every application user may securely connect several email accounts.
+    monitored_accounts: Mapped[list["MonitoredEmailAccount"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin"
     )

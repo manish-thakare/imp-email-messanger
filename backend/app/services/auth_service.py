@@ -9,6 +9,7 @@ from app.core.security import verify_password
 from app.core.security import create_access_token
 
 class AuthService:
+    """Own registration and sign-in decisions for application users."""
 
     def __init__(
 
@@ -21,17 +22,8 @@ class AuthService:
         self.repo = repo
 
 
-    async def register(
-
-        self,
-
-        username,
-
-        primary_email,
-
-        password
-
-    ):
+    async def register(self, username: str, primary_email: str, password: str) -> User:
+        """Register a user after ensuring username and primary email are unused."""
 
         existing_username = await self.repo.get_by_username(
 
@@ -74,15 +66,8 @@ class AuthService:
         return await self.repo.create(user)
 
 
-    async def login(
-
-        self,
-
-        username,
-
-        password
-
-    ):
+    async def login(self, username: str, password: str) -> str | None:
+        """Validate credentials and issue a bearer token when they are correct."""
 
         user = await self.repo.get_by_username(
 

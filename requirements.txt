@@ -19,3 +19,9 @@ pydantic-settings
 python-multipart
 
 email-validator
+
+# Connect to provider and optional LLM HTTP APIs.
+httpx
+
+# Encrypt OAuth access and refresh tokens before storing them.
+cryptography
