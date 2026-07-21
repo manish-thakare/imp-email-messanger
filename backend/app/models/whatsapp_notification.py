@@ -24,6 +24,8 @@ class WhatsAppNotification(Base):
         index=True,
     )
     phone_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Snapshot the bounded notification content at queue time.
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
     provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -100,6 +100,7 @@ class MailSyncService:
                         "priority_label": existing_message.priority_label,
                         "is_priority": existing_message.is_priority,
                         "priority_reason": existing_message.priority_reason,
+                        "priority_explanation": existing_message.priority_explanation,
                         "classification_source": existing_message.classification_source,
                         "classification_fingerprint": existing_message.classification_fingerprint,
                     }

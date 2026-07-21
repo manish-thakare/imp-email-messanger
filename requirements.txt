@@ -23,5 +23,9 @@ email-validator
 # Connect to provider and optional LLM HTTP APIs.
 httpx
 
+# Optional structured-output second-pass classifier and tool primitives.
+langchain-core
+langchain-openai
+
 # Encrypt OAuth access and refresh tokens before storing them.
 cryptography

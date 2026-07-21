@@ -22,4 +22,5 @@ class EmailMessageResponse(BaseModel):
     priority_label: str
     is_priority: bool
     priority_reason: str | None
+    priority_explanation: str | None
     classification_source: str

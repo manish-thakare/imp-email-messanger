@@ -56,6 +56,8 @@ class PriorityServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(assessment.is_priority)
         self.assertEqual(assessment.label, "high")
         self.assertEqual(assessment.source, "rules")
+        self.assertTrue(any(item.category == "security" for item in assessment.explanations))
+        self.assertIn("+60", assessment.reason)
 
     async def test_newsletter_is_not_priority(self) -> None:
         """Routine marketing mail should stay out of the priority-only feed."""
@@ -72,6 +74,7 @@ class PriorityServiceTests(unittest.IsolatedAsyncioTestCase):
         original = {
             "enabled": settings.LLM_PRIORITY_ENABLED,
             "url": settings.LLM_PRIORITY_API_URL,
+            "backend": settings.LLM_PRIORITY_BACKEND,
             "send_body": settings.LLM_PRIORITY_SEND_BODY_PREVIEW,
         }
         fake_client = _FakeAsyncClient({
@@ -79,6 +82,7 @@ class PriorityServiceTests(unittest.IsolatedAsyncioTestCase):
         })
         settings.LLM_PRIORITY_ENABLED = True
         settings.LLM_PRIORITY_API_URL = "https://llm.example.test/v1/chat/completions"
+        settings.LLM_PRIORITY_BACKEND = "http"
         settings.LLM_PRIORITY_SEND_BODY_PREVIEW = False
         try:
             with patch("app.services.priority_service.httpx.AsyncClient", return_value=fake_client):
@@ -88,6 +92,7 @@ class PriorityServiceTests(unittest.IsolatedAsyncioTestCase):
         finally:
             settings.LLM_PRIORITY_ENABLED = original["enabled"]
             settings.LLM_PRIORITY_API_URL = original["url"]
+            settings.LLM_PRIORITY_BACKEND = original["backend"]
             settings.LLM_PRIORITY_SEND_BODY_PREVIEW = original["send_body"]
 
         self.assertEqual(assessment.source, "llm")
@@ -101,11 +106,13 @@ class PriorityServiceTests(unittest.IsolatedAsyncioTestCase):
         """An invalid model result cannot create an invalid priority record."""
         original_enabled = settings.LLM_PRIORITY_ENABLED
         original_url = settings.LLM_PRIORITY_API_URL
+        original_backend = settings.LLM_PRIORITY_BACKEND
         fake_client = _FakeAsyncClient({
             "choices": [{"message": {"content": '{"score": 999, "label": "high", "reason": "bad"}'}}]
         })
         settings.LLM_PRIORITY_ENABLED = True
         settings.LLM_PRIORITY_API_URL = "https://llm.example.test/v1/chat/completions"
+        settings.LLM_PRIORITY_BACKEND = "http"
         try:
             with patch("app.services.priority_service.httpx.AsyncClient", return_value=fake_client):
                 assessment = await EmailPriorityService().classify(
@@ -114,6 +121,7 @@ class PriorityServiceTests(unittest.IsolatedAsyncioTestCase):
         finally:
             settings.LLM_PRIORITY_ENABLED = original_enabled
             settings.LLM_PRIORITY_API_URL = original_url
+            settings.LLM_PRIORITY_BACKEND = original_backend
 
         self.assertEqual(assessment.source, "rules")
         self.assertTrue(assessment.is_priority)

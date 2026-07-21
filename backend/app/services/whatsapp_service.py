@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +17,8 @@ from app.models.whatsapp_contact import WhatsAppContact
 from app.repositories.email_message_repository import EmailMessageRepository
 from app.repositories.whatsapp_contact_repository import WhatsAppContactRepository
 from app.repositories.whatsapp_notification_repository import WhatsAppNotificationRepository
+from app.services.notification_builder import NotificationBuilder, NotificationPayload
+from app.services.whatsapp_command_router import PredefinedWhatsAppToolRouter
 
 
 class WhatsAppError(ValueError):
@@ -48,6 +51,12 @@ class WhatsAppService:
         self.contact_repo = WhatsAppContactRepository(db)
         self.notification_repo = WhatsAppNotificationRepository(db)
         self.message_repo = EmailMessageRepository(db)
+        self.command_router = PredefinedWhatsAppToolRouter({
+            "latest": self._command_latest,
+            "start": self._command_start,
+            "stop": self._command_stop,
+            "help": self._command_help,
+        })
 
     async def save_contact(
         self, user_id: int, phone_number: str, is_opted_in: bool
@@ -81,7 +90,10 @@ class WhatsAppService:
         for message in messages:
             if message.id is None:
                 continue
-            _, created = await self.notification_repo.queue(user_id, message.id, contact.phone_number)
+            payload = NotificationBuilder.build(message)
+            _, created = await self.notification_repo.queue(
+                user_id, message.id, contact.phone_number, payload.as_json()
+            )
             queued_count += int(created)
         if queued_count:
             await self.db.commit()
@@ -103,8 +115,16 @@ class WhatsAppService:
         for notification, message in deliveries:
             notification.attempt_count += 1
             try:
+                try:
+                    payload = (
+                        NotificationPayload.from_json(notification.payload_json)
+                        if notification.payload_json
+                        else NotificationBuilder.build(message)
+                    )
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    payload = NotificationBuilder.build(message)
                 provider_message_id = await self._send_priority_template(
-                    notification.phone_number, message
+                    notification.phone_number, payload
                 )
                 notification.provider_message_id = provider_message_id
                 notification.status = "sent"
@@ -195,23 +215,30 @@ class WhatsAppService:
         if message_data.get("type") != "text":
             return "Reply LATEST to see important emails, or STOP to pause alerts."
         text = str((message_data.get("text") or {}).get("body") or "").strip().lower()
+        return await self.command_router.route(text, contact)
 
-        if text in {"stop", "unsubscribe"}:
-            contact.is_opted_in = False
-            return "Priority-email alerts are paused. Reply START to enable them again."
-        if text in {"start", "subscribe"}:
-            contact.is_opted_in = True
-            return "Priority-email alerts are enabled. Reply LATEST whenever you want a summary."
-        if text in {"latest", "priority", "important"}:
-            messages = await self.message_repo.list_for_user(
-                contact.user_id, priority_only=True, limit=3, offset=0
-            )
-            return _format_priority_summary(messages)
+    async def _command_stop(self, contact: WhatsAppContact) -> str:
+        contact.is_opted_in = False
+        return "Priority-email alerts are paused. Reply START to enable them again."
+
+    async def _command_start(self, contact: WhatsAppContact) -> str:
+        contact.is_opted_in = True
+        return "Priority-email alerts are enabled. Reply LATEST whenever you want a summary."
+
+    async def _command_help(self, contact: WhatsAppContact) -> str:
         return "Reply LATEST for important emails, STOP to pause alerts, or START to resume them."
 
-    async def _send_priority_template(self, phone_number: str, message: EmailMessage) -> str:
+    async def _command_latest(self, contact: WhatsAppContact) -> str:
+        messages = await self.message_repo.list_for_user(
+            contact.user_id, priority_only=True, limit=3, offset=0
+        )
+        return _format_priority_summary(messages)
+
+    async def _send_priority_template(
+        self, phone_number: str, notification_payload: NotificationPayload
+    ) -> str:
         """Send the approved proactive alert template without exposing a full email body."""
-        payload = {
+        request_payload = {
             "messaging_product": "whatsapp",
             "to": _provider_phone_number(phone_number),
             "type": "template",
@@ -222,15 +249,15 @@ class WhatsAppService:
                     {
                         "type": "body",
                         "parameters": [
-                            {"type": "text", "text": _short_text(message.sender or "Unknown sender", 120)},
-                            {"type": "text", "text": _short_text(message.subject, 300)},
-                            {"type": "text", "text": _short_text(message.priority_reason or "Important email", 300)},
+                            {"type": "text", "text": notification_payload.sender},
+                            {"type": "text", "text": notification_payload.subject},
+                            {"type": "text", "text": notification_payload.reason},
                         ],
                     }
                 ],
             },
         }
-        return await self._post_message(payload)
+        return await self._post_message(request_payload)
 
     async def _send_text(self, phone_number: str, text: str) -> str:
         """Reply to an inbound user command inside WhatsApp's customer-service window."""
@@ -305,8 +332,8 @@ def _format_priority_summary(messages: list[EmailMessage]) -> str:
     """Build a compact, privacy-conscious WhatsApp reply from the user's top messages."""
     if not messages:
         return "You have no high-priority emails right now."
-    items = [
-        f"{index}. {_short_text(message.subject, 120)} - {_short_text(message.sender or 'Unknown sender', 80)}"
-        for index, message in enumerate(messages, start=1)
-    ]
+    items = []
+    for index, message in enumerate(messages, start=1):
+        payload = NotificationBuilder.build(message)
+        items.append(f"{index}. {payload.subject} - {payload.sender}")
     return "Your important emails:\n" + "\n".join(items)

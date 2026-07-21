@@ -18,7 +18,7 @@ class WhatsAppNotificationRepository:
         self.db = db
 
     async def queue(
-        self, user_id: int, email_message_id: int, phone_number: str
+        self, user_id: int, email_message_id: int, phone_number: str, payload_json: str
     ) -> tuple[WhatsAppNotification, bool]:
         """Create one pending notification unless that email was already queued."""
         result = await self.db.execute(
@@ -27,6 +27,7 @@ class WhatsAppNotificationRepository:
                 user_id=user_id,
                 email_message_id=email_message_id,
                 phone_number=phone_number,
+                payload_json=payload_json,
                 status="pending",
             )
             .on_conflict_do_nothing(index_elements=[WhatsAppNotification.email_message_id])

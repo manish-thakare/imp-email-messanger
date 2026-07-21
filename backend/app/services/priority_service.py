@@ -10,6 +10,7 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import settings
+from app.core.email_constants import BASE_PRIORITY_SCORE, PRIORITY_RULES, PRIORITY_THRESHOLD
 from app.core.logger import logger
 
 
@@ -22,6 +23,7 @@ class PriorityAssessment:
     is_priority: bool
     reason: str
     source: str
+    explanations: tuple["RuleExplanation", ...] = ()
 
     def as_storage_dict(self, fingerprint: str) -> dict[str, object]:
         """Convert the assessment to model fields used by the message repository."""
@@ -30,9 +32,32 @@ class PriorityAssessment:
             "priority_label": self.label,
             "is_priority": self.is_priority,
             "priority_reason": self.reason,
+            "priority_explanation": json.dumps(
+                [
+                    {
+                        "key": item.key,
+                        "category": item.category,
+                        "weight": item.weight,
+                        "matched_phrases": list(item.matched_phrases),
+                    }
+                    for item in self.explanations
+                ],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
             "classification_source": self.source,
             "classification_fingerprint": fingerprint,
         }
+
+
+@dataclass(frozen=True)
+class RuleExplanation:
+    """One matched weighted rule suitable for UI and audit logs."""
+
+    key: str
+    category: str
+    weight: int
+    matched_phrases: tuple[str, ...]
 
 
 class _LLMPriorityResponse(BaseModel):
@@ -48,12 +73,15 @@ class EmailPriorityService:
 
     async def classify(self, subject: str, sender: str | None, body_preview: str | None) -> PriorityAssessment:
         """Return the best available priority assessment for one normalized message."""
+        first_pass = self._classify_with_rules(subject, sender, body_preview)
         if settings.LLM_PRIORITY_ENABLED and settings.LLM_PRIORITY_API_URL:
             try:
-                return await self._classify_with_llm(subject, sender, body_preview)
-            except (httpx.HTTPError, ValueError, KeyError, TypeError, json.JSONDecodeError, ValidationError) as exc:
+                if settings.LLM_PRIORITY_BACKEND.lower() == "langchain":
+                    return await self._classify_with_langchain(subject, sender, body_preview, first_pass)
+                return await self._classify_with_http(subject, sender, body_preview, first_pass)
+            except (ImportError, httpx.HTTPError, ValueError, KeyError, TypeError, json.JSONDecodeError, ValidationError) as exc:
                 logger.warning("Priority model failed; using rules instead: %s", exc)
-        return self._classify_with_rules(subject, sender, body_preview)
+        return first_pass
 
     def classification_fingerprint(
         self, subject: str, sender: str | None, body_preview: str | None, source: str | None = None
@@ -79,10 +107,40 @@ class EmailPriorityService:
         """Return the configured classifier, without treating a failed call as successful."""
         return "llm" if settings.LLM_PRIORITY_ENABLED and settings.LLM_PRIORITY_API_URL else "rules"
 
-    async def _classify_with_llm(
-        self, subject: str, sender: str | None, body_preview: str | None
+    async def _classify_with_langchain(
+        self,
+        subject: str,
+        sender: str | None,
+        body_preview: str | None,
+        first_pass: PriorityAssessment,
     ) -> PriorityAssessment:
-        """Ask an OpenAI-compatible deployed model for a compact JSON assessment."""
+        """Use LangChain structured output as the optional second-pass classifier."""
+        from app.services.langchain_priority_service import LangChainPriorityClassifier
+
+        result = await LangChainPriorityClassifier().classify(
+            subject, sender, body_preview, first_pass.score, first_pass.reason
+        )
+        score = result.score
+        return PriorityAssessment(
+            score=score,
+            label=_label_for_score(score),
+            is_priority=score >= PRIORITY_THRESHOLD,
+            reason=f"Model: {result.reason}; Rules: {first_pass.reason}"[:160],
+            source="llm",
+            explanations=first_pass.explanations + tuple(
+                RuleExplanation("llm_signal", "model", 0, (signal,))
+                for signal in result.signals
+            ),
+        )
+
+    async def _classify_with_http(
+        self,
+        subject: str,
+        sender: str | None,
+        body_preview: str | None,
+        first_pass: PriorityAssessment,
+    ) -> PriorityAssessment:
+        """Legacy OpenAI-compatible JSON path retained for non-LangChain providers."""
         headers = {"Content-Type": "application/json"}
         if settings.LLM_PRIORITY_API_KEY:
             headers["Authorization"] = f"Bearer {settings.LLM_PRIORITY_API_KEY}"
@@ -101,6 +159,7 @@ class EmailPriorityService:
             "score (integer 0-100), label (high, medium, or low), and reason (at most 160 characters). "
             "High means the user should see it promptly. Consider deadlines, security, money, "
             "work incidents, appointments, and requests requiring action.\n\n"
+            f"Deterministic first-pass score: {first_pass.score}; reason: {first_pass.reason}\n"
             f"EMAIL_DATA={json.dumps(email_data, ensure_ascii=False)}"
         )
         payload = {
@@ -124,7 +183,7 @@ class EmailPriorityService:
             score=result.score,
             # Score is the source of truth when a model returns inconsistent fields.
             label=_label_for_score(result.score),
-            is_priority=result.score >= 70,
+            is_priority=result.score >= PRIORITY_THRESHOLD,
             reason=" ".join(result.reason.split())[:160],
             source="llm",
         )
@@ -134,43 +193,43 @@ class EmailPriorityService:
     ) -> PriorityAssessment:
         """Score the email locally using transparent urgency and noise indicators."""
         text = " ".join((subject or "", sender or "", body_preview or "")).lower()
-        urgent_terms = [
-            "urgent", "immediate action", "action required", "deadline", "overdue",
-            "security alert", "suspicious", "password", "verify your", "fraud",
-            "payment due", "invoice", "interview", "job offer", "production incident",
-            "outage", "approval needed", "meeting today", "appointment",
-        ]
-        action_terms = ["please review", "please respond", "reply requested", "confirm", "sign", "due today"]
-        noise_terms = ["newsletter", "unsubscribe", "weekly digest", "promotion", "special offer", "marketing"]
-
-        urgent_matches = _matching_terms(text, urgent_terms)
-        action_matches = _matching_terms(text, action_terms)
-        noise_matches = _matching_terms(text, noise_terms)
-        # One genuine urgency signal should be visible in the priority feed by itself.
-        score = 25 + min(60, len(urgent_matches) * 55) + min(30, len(action_matches) * 25)
-        score -= min(50, len(noise_matches) * 30)
-        score = max(0, min(100, score))
+        explanations = tuple(
+            RuleExplanation(rule.key, rule.category, rule.weight, tuple(matches))
+            for rule in PRIORITY_RULES
+            if (matches := _matching_terms(text, rule.phrases))
+        )
+        score = max(0, min(100, BASE_PRIORITY_SCORE + sum(item.weight for item in explanations)))
         label = _label_for_score(score)
 
-        if urgent_matches:
-            reason = f"Important signals: {', '.join(urgent_matches[:3])}"
-        elif action_matches:
-            reason = f"Action requested: {', '.join(action_matches[:3])}"
-        elif noise_matches:
-            reason = f"Low-priority signals: {', '.join(noise_matches[:3])}"
+        positive = [item for item in explanations if item.weight > 0]
+        negative = [item for item in explanations if item.weight < 0]
+        if positive and negative:
+            reason = (
+                f"Important: {', '.join(_explanation_text(item) for item in positive[:3])}; "
+                f"reduced by: {', '.join(_explanation_text(item) for item in negative[:2])}"
+            )
+        elif positive:
+            reason = f"Important: {', '.join(_explanation_text(item) for item in positive[:3])}"
+        elif negative:
+            reason = f"Low-priority: {', '.join(_explanation_text(item) for item in negative[:3])}"
         else:
             reason = "No clear urgent or low-priority signals found"
-        return PriorityAssessment(score, label, score >= 70, reason, "rules")
+        return PriorityAssessment(score, label, score >= PRIORITY_THRESHOLD, reason, "rules", explanations)
 
 
-def _matching_terms(text: str, terms: list[str]) -> list[str]:
+def _matching_terms(text: str, terms: tuple[str, ...] | list[str]) -> list[str]:
     """Return each configured term that appears in the normalized email text."""
     return [term for term in terms if term in text]
 
 
+def _explanation_text(explanation: RuleExplanation) -> str:
+    """Render one evidence item consistently for API and notifications."""
+    return f"{explanation.category} ({', '.join(explanation.matched_phrases[:2])}, {explanation.weight:+d})"
+
+
 def _label_for_score(score: int) -> str:
     """Map a numeric score to the label shown in the client inbox."""
-    if score >= 70:
+    if score >= PRIORITY_THRESHOLD:
         return "high"
     if score >= 45:
         return "medium"

@@ -35,7 +35,9 @@ class Settings(BaseSettings):
 
     # A deployed OpenAI-compatible model can replace the local priority heuristic.
     LLM_PRIORITY_ENABLED: bool = False
+    LLM_PRIORITY_BACKEND: str = "langchain"
     LLM_PRIORITY_API_URL: str | None = None
+    LLM_PRIORITY_BASE_URL: str | None = None
     LLM_PRIORITY_API_KEY: str | None = None
     LLM_PRIORITY_MODEL: str = "email-priority-classifier"
     LLM_PRIORITY_TIMEOUT_SECONDS: float = 15

@@ -42,8 +42,9 @@ are correct, apply the initial schema from the repository root:
 ```
 
 This creates the user, connected-inbox, fetched-message, WhatsApp contact, and
-WhatsApp notification-outbox tables. The third revision also adds a classification
-fingerprint, allowing unchanged emails to avoid repeated rule or LLM evaluation.
+WhatsApp notification-outbox tables. Later revisions add a classification fingerprint
+and a durable notification payload snapshot, allowing unchanged emails to avoid repeated
+evaluation and queued alerts to survive message edits.
 No migration is run automatically.
 
 Before applying a non-empty database, take a backup and inspect the current revision:
@@ -62,10 +63,11 @@ future schema changes.
 ## LLM priority classification
 
 The built-in rule classifier is always available. To enable the optional
-OpenAI-compatible classifier, configure `LLM_PRIORITY_ENABLED`,
-`LLM_PRIORITY_API_URL`, and `LLM_PRIORITY_MODEL` in the local `.env` file. The
-classifier asks for a tightly validated JSON response and falls back to rules on any
-provider or validation failure.
+OpenAI-compatible LangChain classifier, configure `LLM_PRIORITY_ENABLED`,
+`LLM_PRIORITY_BACKEND=langchain`, `LLM_PRIORITY_BASE_URL`, and
+`LLM_PRIORITY_MODEL` in the local `.env` file. The rule engine always runs first;
+LangChain is the optional second pass and returns a tightly validated structured
+response. The classifier falls back to rules on any provider or validation failure.
 
 By default, email body previews are **not** sent to the LLM. Set
 `LLM_PRIORITY_SEND_BODY_PREVIEW=true` only after a privacy and data-processing review;
