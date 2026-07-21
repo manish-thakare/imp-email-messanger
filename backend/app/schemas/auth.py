@@ -3,6 +3,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 class RegisterSchema(BaseModel):
     """Information required to create an application account."""
+    model_config = ConfigDict(extra="forbid")
+
     username: str = Field(min_length=3, max_length=100, pattern=r"^[A-Za-z0-9_.-]+$")
     primary_email: EmailStr
     password: str = Field(min_length=8, max_length=128)

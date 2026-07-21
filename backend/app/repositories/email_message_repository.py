@@ -46,6 +46,18 @@ class EmailMessageRepository:
             setattr(message, field, value)
         return message, is_new
 
+    async def get_by_provider_message_id(
+        self, account_id: int, provider_message_id: str
+    ) -> EmailMessage | None:
+        """Return an existing provider message before deciding whether to reclassify it."""
+        result = await self.db.execute(
+            select(EmailMessage).where(
+                EmailMessage.account_id == account_id,
+                EmailMessage.provider_message_id == provider_message_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def list_for_user(
         self, user_id: int, priority_only: bool, limit: int, offset: int
     ) -> list[EmailMessage]:

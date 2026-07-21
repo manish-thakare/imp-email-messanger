@@ -1,0 +1,18 @@
+# Local configuration and provider credentials
+backend/.env
+backend/.env.*
+!backend/.env.example
+backend/app/resources/*.json
+backend/app/resources/*.txt
+
+# Python build and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local virtual environments and IDE files
+venv/
+.venv/
+.vscode/

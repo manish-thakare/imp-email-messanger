@@ -35,6 +35,10 @@ class EmailMessage(Base):
     is_priority: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     priority_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     classification_source: Mapped[str] = mapped_column(String(30), default="rules", nullable=False)
+    # Identifies the normalized content and classifier version used for this assessment.
+    classification_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

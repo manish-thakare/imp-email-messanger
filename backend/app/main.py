@@ -3,21 +3,22 @@ from contextlib import suppress
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from app.core.config import settings
-from app.core.logger import logger
 from app.api.email_accounts import router as email_accounts_router
 from app.api.messages import router as messages_router
 from app.api.routes import router as auth_router
 from app.api.user import router as user_router
+from app.api.whatsapp import router as whatsapp_router
+from app.core.config import settings
+from app.core.logger import logger
 from app.workers.mail_sync_worker import run_mail_sync_worker
 
-# Import every mapped model before SQLAlchemy resolves relationship names at runtime.
+# Register every model before SQLAlchemy resolves relationship names at runtime.
 import app.models  # noqa: F401
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start the opt-in inbox worker and stop it cleanly during application shutdown."""
+    """Start the opt-in inbox worker and stop it cleanly during shutdown."""
     logger.info("Application started")
     stop_event = asyncio.Event()
     worker_task: asyncio.Task[None] | None = None
@@ -63,10 +64,15 @@ app.include_router(
     tags=["Messages"],
 )
 
+app.include_router(
+    whatsapp_router,
+    prefix="/api/v1/whatsapp",
+    tags=["WhatsApp"],
+)
+
 @app.get("/")
 async def home():
     """Expose a lightweight service health response."""
     return {
         "status": "running"
     }
-
